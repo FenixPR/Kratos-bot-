@@ -44,11 +44,15 @@ class TradingBotMain:
         self.total_wins = 0
         self.total_losses = 0
         self.last_report_time = time.time()
+        
         self.target_profit = float(self.config_manager.get('trading.target_profit', 100.0))
         self.max_loss = -abs(float(self.config_manager.get('trading.max_loss', 1000.0)))
 
+        # --- RESET TOTAL DE ESTADOS AO INICIAR ---
         self.is_running = False
         self.is_trade_in_progress = False
+        self.is_paused = False
+        self.pause_end_time = 0
         self.shutdown_requested = False
 
         signal.signal(signal.SIGINT, self.signal_handler)
@@ -63,24 +67,31 @@ class TradingBotMain:
 
     async def start_trading(self):
         if self.is_running: return
+        
+        # Forçamos a limpeza de qualquer trava antiga ao dar /start
+        self.is_trade_in_progress = False
+        self.is_paused = False
+        self.pause_end_time = 0
         self.is_running = True
+        
         self.total_profit = 0.0
         self.total_wins = 0
         self.total_losses = 0
         self.last_report_time = time.time()
         self.trading_strategy.reset()
-        await self.telegram_bot.send_status_message("✅ <b>Bot INICIADO.</b> Sessão Sniper ativa.")
+        
+        await self.telegram_bot.send_status_message("✅ <b>Bot Sniper Ativado.</b>\nTravas de segurança resetadas.")
 
     async def stop_trading(self):
-        if not self.is_running: return
         self.is_running = False
-        await self.telegram_bot.send_status_message("🛑 <b>Bot PARADO.</b>")
+        self.is_trade_in_progress = False # Destrava ao parar
+        await self.telegram_bot.send_status_message("🛑 <b>Bot Pausado pelo Usuário.</b>")
 
     async def set_target_profit(self, new_profit: float):
         self.target_profit = new_profit
         self.config_manager.set('trading.target_profit', new_profit)
         self.config_manager.save_config()
-        await self.telegram_bot.send_status_message(f"🎯 Stop Win: ${new_profit:.2f}")
+        await self.telegram_bot.send_status_message(f"🎯 Meta de Lucro: ${new_profit:.2f}")
 
     async def set_max_loss(self, new_loss: float):
         self.max_loss = -abs(new_loss)
@@ -93,7 +104,7 @@ class TradingBotMain:
         await self.telegram_bot.send_status_message(f"💸 Stake: ${new_stake:.2f}")
 
     async def web_server(self):
-        async def health_check(request): return web.Response(text="Bot Online")
+        async def health_check(request): return web.Response(text="Kratos Online")
         app = web.Application()
         app.router.add_get('/', health_check)
         runner = web.AppRunner(app)
@@ -105,38 +116,66 @@ class TradingBotMain:
         try:
             if not await self.telegram_bot.test_connection(): raise Exception("Erro Telegram")
             if not self.deriv_api.connect(): raise Exception("Erro Deriv")
+            
             self.deriv_api.set_callback("tick", self.on_tick_received, asyncio.get_running_loop())
             self.deriv_api.set_callback("trade_result", self.on_trade_result, asyncio.get_running_loop())
-            for s in ["R_100", "R_75", "R_50", "R_25", "R_10"]: self.deriv_api.subscribe_to_ticks(s)
+
+            for s in ["R_100", "R_75", "R_50", "R_25", "R_10"]: 
+                self.deriv_api.subscribe_to_ticks(s)
+            
             asyncio.create_task(self.web_server())
             asyncio.create_task(self.telegram_bot.run_polling())
-            await self.telegram_bot.send_status_message("🤖 <b>Bot Conectado.</b>")
+            await self.telegram_bot.send_status_message("🤖 <b>Bot Sniper Conectado.</b>")
+            
             while not self.shutdown_requested:
-                if self.is_running and (time.time() - self.last_report_time) >= 300:
-                    self.last_report_time = time.time()
+                current_time = time.time()
+                
+                # Gerencia a saída da pausa
+                if self.is_paused and current_time >= self.pause_end_time:
+                    self.is_paused = False
+                    self.is_trade_in_progress = False # Destrava o fluxo
+                    self.logger.info("Pausa de segurança finalizada. Retomando análise.")
+
+                if self.is_running and (current_time - self.last_report_time) >= 300:
+                    self.last_report_time = current_time
                     await self.telegram_bot.send_periodic_report(self.total_profit, self.total_wins, self.total_losses)
+                
                 await asyncio.sleep(5)
         finally: self.stop()
     
     async def on_tick_received(self, tick_data):
-        if not self.is_running or self.is_trade_in_progress: return
+        # A trava is_trade_in_progress impede novas entradas se uma já estiver no ar
+        if not self.is_running or self.is_trade_in_progress or self.is_paused: 
+            return
+            
         trade_signal = self.trading_strategy.analyze_tick(tick_data)
         if trade_signal:
-            self.is_trade_in_progress = True
+            self.is_trade_in_progress = True # Ativa a trava de entrada
             await self.telegram_bot.send_trade_notification(trade_signal)
             self.deriv_api.buy_contract(**trade_signal)
 
     async def on_trade_result(self, result: str, details: dict):
-        self.is_trade_in_progress = False # DESTRAVA IMEDIATA
+        # O segredo está aqui: Liberar a trava IMEDIATAMENTE após receber o resultado
+        self.is_trade_in_progress = False 
+        
         profit = float(details.get('profit', 0.0))
         self.total_profit += profit
+        
         if result == "WIN": self.total_wins += 1
         else: self.total_losses += 1
+
         await self.telegram_bot.send_result_notification(result, profit, self.total_profit)
         self.trading_strategy.on_trade_result(result)
-        if self.total_profit >= self.target_profit or self.total_profit <= self.max_loss:
+
+        # Se houver 2 losses, entra em pausa mas SEM prender a variável de trade para sempre
+        if self.trading_strategy.consecutive_losses >= 2:
+            self.is_paused = True
+            self.pause_end_time = time.time() + 300
+            await self.telegram_bot.send_status_message("⚠️ <b>Aviso:</b> 2 perdas seguidas. Pausa de 5 min para aguardar sinal Sniper.")
+
+        elif self.total_profit >= self.target_profit or self.total_profit <= self.max_loss:
             self.is_running = False
-            await self.telegram_bot.send_status_message("🏁 Meta Atingida. Bot Pausado.")
+            await self.telegram_bot.send_status_message(f"🏁 Meta atingida! Lucro: ${self.total_profit:.2f}")
 
     def stop(self):
         self.shutdown_requested = True
