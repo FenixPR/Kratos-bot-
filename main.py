@@ -24,16 +24,23 @@ class TradingBotMain:
         
         self.config_manager = ConfigManager(config_path)
 
+        # --- AJUSTE PARA RENDER: PRIORIDADE PARA VARIÁVEIS DE AMBIENTE ---
+        # Tenta pegar do sistema (Render) primeiro, se vazio, pega do config_manager
+        deriv_app_id = os.getenv("DERIV_APP_ID") or self.config_manager.get("deriv.app_id")
+        deriv_token = os.getenv("DERIV_API_TOKEN") or self.config_manager.get("deriv.api_token")
+        tele_token = os.getenv("TELEGRAM_BOT_TOKEN") or self.config_manager.get("telegram.bot_token")
+        tele_chat = os.getenv("TELEGRAM_CHAT_ID") or self.config_manager.get("telegram.chat_id")
+
         self.deriv_api = DerivAPI(
-            app_id=self.config_manager.get("deriv.app_id"),
-            api_token=self.config_manager.get("deriv.api_token")
+            app_id=str(deriv_app_id),
+            api_token=str(deriv_token)
         )
         
         self.trading_strategy = TradingStrategy(self.config_manager)
         
         self.telegram_bot = TelegramTradingBot(
-            bot_token=self.config_manager.get("telegram.bot_token"),
-            chat_id=self.config_manager.get("telegram.chat_id"),
+            bot_token=str(tele_token),
+            chat_id=str(tele_chat),
             start_callback=self.start_trading,
             stop_callback=self.stop_trading,
             profit_callback=self.set_target_profit,
@@ -46,6 +53,7 @@ class TradingBotMain:
         self.total_losses = 0
         self.last_report_time = time.time()
         
+        # Carrega as metas salvas no config_manager
         self.target_profit = float(self.config_manager.get('trading.target_profit', 100.0))
         self.max_loss = -abs(float(self.config_manager.get('trading.max_loss', 1000.0)))
 
@@ -91,25 +99,22 @@ class TradingBotMain:
 
     async def set_target_profit(self, new_profit: float):
         self.target_profit = new_profit
-        # Salva no arquivo bot_config.json
         self.config_manager.set('trading.target_profit', new_profit)
         self.config_manager.save_config()
-        await self.telegram_bot.send_status_message(f"🎯 <b>Stop Win</b> (Meta de Lucro) atualizado para: ${new_profit:.2f}")
+        await self.telegram_bot.send_status_message(f"🎯 <b>Stop Win</b> atualizado para: ${new_profit:.2f}")
 
     async def set_max_loss(self, new_loss: float):
-        self.max_loss = -abs(new_loss) # Garante que fique negativo para o cálculo matemático
-        # Salva no arquivo bot_config.json
+        self.max_loss = -abs(new_loss)
         self.config_manager.set('trading.max_loss', self.max_loss)
         self.config_manager.save_config()
-        await self.telegram_bot.send_status_message(f"🛡️ <b>Stop Loss</b> (Perda Máxima) atualizado para: ${abs(self.max_loss):.2f}")
+        await self.telegram_bot.send_status_message(f"🛡️ <b>Stop Loss</b> atualizado para: ${abs(self.max_loss):.2f}")
 
     async def set_stake_amount(self, new_stake: float):
         self.trading_strategy.set_stake(new_stake)
-        await self.telegram_bot.send_status_message(f"💸 Valor de entrada (Stake) atualizado para: ${new_stake:.2f}")
+        await self.telegram_bot.send_status_message(f"💸 <b>Stake</b> atualizada para: ${new_stake:.2f}")
 
-    # --- FUNÇÃO DO SERVIDOR WEB (PARA MANTER ONLINE NO RENDER.COM) ---
+    # --- SERVIDOR WEB PARA MANTER ONLINE NO RENDER.COM ---
     async def web_server(self):
-        """Mini servidor para enganar o Render e manter o bot acordado."""
         async def health_check(request):
             return web.Response(text="Bot Kratos 100% Online e Operando!")
             
@@ -119,7 +124,6 @@ class TradingBotMain:
         runner = web.AppRunner(app)
         await runner.setup()
         
-        # O Render fornece a porta automaticamente nesta variável de ambiente
         port = int(os.environ.get("PORT", 8080))
         site = web.TCPSite(runner, '0.0.0.0', port)
         await site.start()
@@ -136,16 +140,15 @@ class TradingBotMain:
             symbols = ["R_100", "R_75", "R_50", "R_25", "R_10"]
             for s in symbols: self.deriv_api.subscribe_to_ticks(s)
             
-            # Inicia o servidor web junto com o bot
             asyncio.create_task(self.web_server())
             
             telegram_task = asyncio.create_task(self.telegram_bot.run_polling())
-            await self.telegram_bot.send_status_message("🤖 Bot Conectado.\n\nComandos disponíveis:\n/start\n/stop\n/stopwin [valor]\n/stoploss [valor]\n/set_stake [valor]")
+            await self.telegram_bot.send_status_message("🤖 <b>Bot Conectado.</b>\n\n/start | /stop\n/stopwin | /stoploss\n/set_stake")
             
             while not self.shutdown_requested:
                 current_time = time.time()
                 
-                # Relatório a cada 5 minutos (300 segundos)
+                # Relatório a cada 5 minutos
                 if self.is_running and (current_time - self.last_report_time) >= 300:
                     self.last_report_time = current_time
                     await self.telegram_bot.send_periodic_report(self.total_profit, self.total_wins, self.total_losses)
@@ -153,7 +156,7 @@ class TradingBotMain:
                 await asyncio.sleep(5)
             telegram_task.cancel()
         except Exception as e:
-            self.logger.error(f"Erro: {e}")
+            self.logger.error(f"Erro no loop principal: {e}")
         finally: 
             self.stop()
     
@@ -166,7 +169,7 @@ class TradingBotMain:
                 await self.telegram_bot.send_trade_notification(trade_signal)
                 self.deriv_api.buy_contract(**trade_signal)
         except Exception as e:
-            self.logger.error(f"Erro tick: {e}")
+            self.logger.error(f"Erro ao processar tick: {e}")
             self.is_trade_in_progress = False
 
     async def on_trade_result(self, result: str, details: dict):
@@ -183,9 +186,9 @@ class TradingBotMain:
 
             if self.total_profit >= self.target_profit or self.total_profit <= self.max_loss:
                 self.is_running = False
-                await self.telegram_bot.send_status_message(f"🏁 Meta atingida! Lucro/Perda Final da sessão: ${self.total_profit:.2f}\nO bot foi pausado automaticamente.")
+                await self.telegram_bot.send_status_message(f"🏁 Meta atingida! Lucro/Perda Final: ${self.total_profit:.2f}\nO bot pausou automaticamente.")
         except Exception as e:
-            self.logger.error(f"Erro resultado: {e}")
+            self.logger.error(f"Erro no resultado: {e}")
             self.is_trade_in_progress = False
 
     def stop(self):
