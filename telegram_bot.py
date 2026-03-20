@@ -9,7 +9,7 @@ class TelegramTradingBot:
                  stop_callback: Callable[[], Awaitable[None]],
                  profit_callback: Optional[Callable[[float], Awaitable[None]]] = None,
                  loss_callback: Optional[Callable[[float], Awaitable[None]]] = None,
-                 stake_callback: Optional[Callable[[float], Awaitable[None]]] = None): # <-- NOVO
+                 stake_callback: Optional[Callable[[float], Awaitable[None]]] = None):
         if not bot_token or not chat_id:
             raise ValueError("O token do bot e o chat_id não podem ser nulos.")
         
@@ -24,30 +24,31 @@ class TelegramTradingBot:
         self.stop_callback = stop_callback
         self.profit_callback = profit_callback
         self.loss_callback = loss_callback
-        self.stake_callback = stake_callback # <-- NOVO
+        self.stake_callback = stake_callback
 
-        self.application.add_handler(CommandHandler("start_bot", self.start_command))
-        self.application.add_handler(CommandHandler("stop_bot", self.stop_command))
-        self.application.add_handler(CommandHandler("set_profit", self.set_profit_command))
-        self.application.add_handler(CommandHandler("set_loss", self.set_loss_command))
-        self.application.add_handler(CommandHandler("set_stake", self.set_stake_command)) # <-- NOVO
+        # --- NOVOS COMANDOS SIMPLIFICADOS ---
+        self.application.add_handler(CommandHandler("start", self.start_command))
+        self.application.add_handler(CommandHandler("stop", self.stop_command))
+        self.application.add_handler(CommandHandler("stopwin", self.set_profit_command))
+        self.application.add_handler(CommandHandler("stoploss", self.set_loss_command))
+        self.application.add_handler(CommandHandler("set_stake", self.set_stake_command))
 
     def is_authorized(self, update: Update) -> bool:
         return str(update.effective_chat.id) == self.chat_id
 
     async def handle_unauthorized(self, update: Update):
         chat_id_recebido = update.effective_chat.id
-        self.logger.warning(f"Comando ignorado do chat_id não autorizado: {chat_id_recebido}")
+        self.logger.warning(f"Comando ignorado de chat_id não autorizado: {chat_id_recebido}")
         await update.message.reply_text("❌ **Não Autorizado** ❌")
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.is_authorized(update): return
-        await update.message.reply_text("▶️ Comando para iniciar as operações recebido. A iniciar o bot...")
+        await update.message.reply_text("▶️ Iniciando o bot...")
         await self.start_callback()
 
     async def stop_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.is_authorized(update): return
-        await update.message.reply_text("⏸️ Comando para parar as operações recebido. A parar o bot...")
+        await update.message.reply_text("⏸️ Parando o bot...")
         await self.stop_callback()
 
     async def set_profit_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -58,7 +59,7 @@ class TelegramTradingBot:
                 await update.message.reply_text("❌ Erro: O valor deve ser maior que zero.")
                 return
             if self.profit_callback: await self.profit_callback(new_profit)
-        except: await update.message.reply_text("⚠️ Use o formato: `/set_profit <valor>`")
+        except: await update.message.reply_text("⚠️ Use o formato: `/stopwin <valor>`\nExemplo: `/stopwin 50`")
 
     async def set_loss_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.is_authorized(update): return
@@ -68,9 +69,8 @@ class TelegramTradingBot:
                 await update.message.reply_text("❌ Erro: O valor deve ser maior que zero.")
                 return
             if self.loss_callback: await self.loss_callback(new_loss)
-        except: await update.message.reply_text("⚠️ Use o formato: `/set_loss <valor>`")
+        except: await update.message.reply_text("⚠️ Use o formato: `/stoploss <valor>`\nExemplo: `/stoploss 20`")
 
-    # --- NOVO COMANDO SET_STAKE ---
     async def set_stake_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not self.is_authorized(update): return
         try:
@@ -79,7 +79,7 @@ class TelegramTradingBot:
                 await update.message.reply_text("❌ Erro: O valor da entrada deve ser maior que zero.")
                 return
             if self.stake_callback: await self.stake_callback(new_stake)
-        except: await update.message.reply_text("⚠️ Use o formato: `/set_stake <valor>`\nExemplo: `/set_stake 0.60`")
+        except: await update.message.reply_text("⚠️ Use o formato: `/set_stake <valor>`\nExemplo: `/set_stake 1.00`")
 
     async def run_polling(self):
         self.logger.info("O bot do Telegram está a ouvir por comandos...")
@@ -87,12 +87,11 @@ class TelegramTradingBot:
         await self.application.start()
         await self.application.updater.start_polling()
 
-    # --- ATUALIZADO PARA RELATÓRIO DE 5 MINUTOS ---
     async def send_periodic_report(self, total_profit: float, total_wins: int, total_losses: int):
         try:
             win_rate = (total_wins / (total_wins + total_losses) * 100) if (total_wins + total_losses) > 0 else 0
             message = f"""
-📊 <b>Relatório de 5 Minutos</b> 📊
+📊 <b>Relatório da Sessão</b> 📊
 
 💰 <b>Saldo Atual:</b> ${total_profit:.2f}
 
