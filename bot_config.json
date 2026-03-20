@@ -39,15 +39,15 @@
         "auto_restart": true
     },
     "telegram": {
-        "bot_token": "8467691797:AAEuB0KySBOVfdEy3pJI3gsGJrS3E44flAo",
-        "chat_id": "1256695413"
+        "bot_token": "",
+        "chat_id": ""
     },
     "deriv": {
-        "app_id": "99542",
-        "api_token": "4cle1JCgjtQJ8zH"
+        "app_id": "",
+        "api_token": ""
     },
     "ai": {
-        "openai_api_key": "AIzaSyA5lrEU5jBH5KwLxJ4MkSKLVha0un3D0X8",
+        "openai_api_key": "",
         "openai_base_url": "https://api.openai.com/v1",
         "model": "gemini-2.5-flash"
     }
