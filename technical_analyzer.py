@@ -1,47 +1,58 @@
 import logging
+import math
 
 class TechnicalAnalyzer:
-    # Médias móveis estendidas para 14 e 50 ticks para confirmar tendências longas
-    def __init__(self, rsi_period=14, sma_short=14, sma_long=50):
+    def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.rsi_period = rsi_period
-        self.sma_short = sma_short
-        self.sma_long = sma_long
 
-    def calculate_rsi(self, prices):
-        if len(prices) < self.rsi_period + 1:
-            return None
+    def calculate_indicators(self, prices):
+        if len(prices) < 100: return None
+        
+        # 1. RSI (Força)
+        period = 14
         deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
-        gains = [d if d > 0 else 0 for d in deltas]
-        losses = [-d if d < 0 else 0 for d in deltas]
+        gains = [d if d > 0 else 0 for d in deltas[-period:]]
+        losses = [-d if d < 0 else 0 for d in deltas[-period:]]
+        avg_gain = sum(gains) / period
+        avg_loss = sum(losses) / period
+        rsi = 100 - (100 / (1 + (avg_gain/avg_loss))) if avg_loss > 0 else 100
 
-        avg_gain = sum(gains[-self.rsi_period:]) / self.rsi_period
-        avg_loss = sum(losses[-self.rsi_period:]) / self.rsi_period
+        # 2. Médias Móveis (Tendência de Fundo)
+        sma_fast = sum(prices[-20:]) / 20
+        sma_slow = sum(prices[-100:]) / 100
 
-        if avg_loss == 0: return 100.0
-        rs = avg_gain / avg_loss
-        return 100 - (100 / (1 + rs))
+        # 3. Bandas de Bollinger (Volatilidade)
+        mean = sum(prices[-20:]) / 20
+        variance = sum((x - mean) ** 2 for x in prices[-20:]) / 20
+        std_dev = math.sqrt(variance)
+        upper_band = mean + (2.5 * std_dev) # 2.5 para ser mais rígido
+        lower_band = mean - (2.5 * std_dev)
 
-    def calculate_sma(self, prices, period):
-        if len(prices) < period: return None
-        return sum(prices[-period:]) / period
+        return {
+            "rsi": rsi,
+            "sma_fast": sma_fast,
+            "sma_slow": sma_slow,
+            "upper": upper_band,
+            "lower": lower_band,
+            "price": prices[-1]
+        }
 
     def analyze_trend(self, prices):
-        rsi = self.calculate_rsi(prices)
-        sma_curta = self.calculate_sma(prices, self.sma_short)
-        sma_longa = self.calculate_sma(prices, self.sma_long)
-        preco_atual = prices[-1]
+        ind = self.calculate_indicators(prices)
+        if not ind: return {"status": "WAIT"}
 
-        if rsi is None or sma_curta is None or sma_longa is None:
-            return {"status": "WAIT", "reason": "Coletando dados suficientes"}
+        p = ind["price"]
+        
+        # --- CRITÉRIOS SNIPER DE ALTA PRECISÃO ---
+        
+        # Filtro de Compra (CALL): 
+        # Preço acima da tendência longa + Preço rompeu banda inferior + RSI sobrevendido
+        if p > ind["sma_slow"] and p < ind["lower"] and ind["rsi"] < 35:
+            return {"status": "ULTRA_CALL", "rsi": ind["rsi"]}
 
-        # --- CONFLUÊNCIA DE ALTA (SNIPER CALL) ---
-        if preco_atual > sma_curta > sma_longa and rsi > 60:
-            return {"status": "STRONG_UPTREND", "rsi": rsi}
+        # Filtro de Venda (PUT): 
+        # Preço abaixo da tendência longa + Preço rompeu banda superior + RSI sobrecomprado
+        elif p < ind["sma_slow"] and p > ind["upper"] and ind["rsi"] > 65:
+            return {"status": "ULTRA_PUT", "rsi": ind["rsi"]}
 
-        # --- CONFLUÊNCIA DE BAIXA (SNIPER PUT) ---
-        elif preco_atual < sma_curta < sma_longa and rsi < 40:
-            return {"status": "STRONG_DOWNTREND", "rsi": rsi}
-
-        else:
-            return {"status": "NEUTRAL", "rsi": rsi}
+        return {"status": "NEUTRAL"}
