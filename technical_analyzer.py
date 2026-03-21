@@ -8,7 +8,7 @@ class TechnicalAnalyzer:
     def calculate_indicators(self, prices):
         if len(prices) < 100: return None
         
-        # 1. RSI (Força)
+        # 1. RSI (Força do Movimento)
         period = 14
         deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
         gains = [d if d > 0 else 0 for d in deltas[-period:]]
@@ -17,16 +17,16 @@ class TechnicalAnalyzer:
         avg_loss = sum(losses) / period
         rsi = 100 - (100 / (1 + (avg_gain/avg_loss))) if avg_loss > 0 else 100
 
-        # 2. Médias Móveis (Tendência de Fundo)
+        # 2. Médias Móveis (Direção da Tendência)
         sma_fast = sum(prices[-20:]) / 20
         sma_slow = sum(prices[-100:]) / 100
 
-        # 3. Bandas de Bollinger (Volatilidade)
+        # 3. Bandas de Bollinger (Volatilidade Extremada)
         mean = sum(prices[-20:]) / 20
         variance = sum((x - mean) ** 2 for x in prices[-20:]) / 20
         std_dev = math.sqrt(variance)
-        upper_band = mean + (2.5 * std_dev) # 2.5 para ser mais rígido
-        lower_band = mean - (2.5 * std_dev)
+        upper_band = mean + (2.2 * std_dev) 
+        lower_band = mean - (2.2 * std_dev)
 
         return {
             "rsi": rsi,
@@ -43,16 +43,16 @@ class TechnicalAnalyzer:
 
         p = ind["price"]
         
-        # --- CRITÉRIOS SNIPER DE ALTA PRECISÃO ---
+        # --- ESTRATÉGIA ULTRA SNIPER: SEGUIDOR DE TENDÊNCIA ---
         
-        # Filtro de Compra (CALL): 
-        # Preço acima da tendência longa + Preço rompeu banda inferior + RSI sobrevendido
-        if p > ind["sma_slow"] and p < ind["lower"] and ind["rsi"] < 35:
+        # Só entra em CALL se: 
+        # Preço acima da média lenta + Preço rompendo a banda SUPERIOR + RSI Forte (>65)
+        if p > ind["sma_slow"] and p > ind["upper"] and ind["rsi"] > 65:
             return {"status": "ULTRA_CALL", "rsi": ind["rsi"]}
 
-        # Filtro de Venda (PUT): 
-        # Preço abaixo da tendência longa + Preço rompeu banda superior + RSI sobrecomprado
-        elif p < ind["sma_slow"] and p > ind["upper"] and ind["rsi"] > 65:
+        # Só entra em PUT se: 
+        # Preço abaixo da média lenta + Preço rompendo a banda INFERIOR + RSI Fraco (<35)
+        elif p < ind["sma_slow"] and p < ind["lower"] and ind["rsi"] < 35:
             return {"status": "ULTRA_PUT", "rsi": ind["rsi"]}
 
         return {"status": "NEUTRAL"}
