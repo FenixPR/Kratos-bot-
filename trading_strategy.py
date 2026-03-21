@@ -8,14 +8,17 @@ class TradingStrategy:
         self.config_manager = config_manager
         self.logger = logging.getLogger(__name__)
         self.tech_analyzer = TechnicalAnalyzer()
+        
         self.initial_stake = float(self.config_manager.get('trading.stake_amount', 1.0))
         self.martingale_multiplier = float(self.config_manager.get('trading.martingale_multiplier', 2.1))
         self.martingale_max_consecutive_losses = int(self.config_manager.get('trading.martingale_max_consecutive_losses', 5))
+        
         self.current_stake = self.initial_stake
         self.consecutive_losses = 0
         self.tick_histories: Dict[str, List[float]] = {}
-        self.max_history = 500
+        self.max_history = 600 # Aumentado para suportar análise longa
         self.global_pause_until = 0
+        
         self.reset()
 
     def reset(self):
@@ -32,34 +35,56 @@ class TradingStrategy:
     def analyze_tick(self, tick_data: dict) -> Optional[Dict[str, Any]]:
         current_time = time.time()
         if current_time < self.global_pause_until: return None
+        
         symbol = tick_data.get('symbol', 'Unknown')
         quote = float(tick_data.get('quote', 0))
+        
         if symbol not in self.tick_histories: self.tick_histories[symbol] = []
         self.tick_histories[symbol].append(quote)
-        if len(self.tick_histories[symbol]) > self.max_history: self.tick_histories[symbol].pop(0)
+        
+        if len(self.tick_histories[symbol]) > self.max_history: 
+            self.tick_histories[symbol].pop(0)
 
-        if len(self.tick_histories[symbol]) >= 100:
+        # --- EXIGÊNCIA SNIPER: 200 TICKS DE ANÁLISE PRÉVIA ---
+        if len(self.tick_histories[symbol]) >= 200:
             analysis = self.tech_analyzer.analyze_trend(self.tick_histories[symbol])
             status = analysis.get("status")
-            if status == "ULTRA_CALL": return self._create_trade_signal("CALL", symbol)
-            elif status == "ULTRA_PUT": return self._create_trade_signal("PUT", symbol)
+            
+            if status == "ULTRA_CALL": 
+                self.logger.info(f"🎯 [SNIPER] Tendência de ALTA Confirmada em {symbol}. Entrando CALL.")
+                return self._create_trade_signal("CALL", symbol)
+            elif status == "ULTRA_PUT": 
+                self.logger.info(f"🎯 [SNIPER] Tendência de QUEDA Confirmada em {symbol}. Entrando PUT.")
+                return self._create_trade_signal("PUT", symbol)
+        
+        # Feedback visual nos logs a cada 50 ticks
+        elif len(self.tick_histories[symbol]) % 50 == 0:
+            self.logger.info(f"🔍 {symbol}: Monitorando... ({len(self.tick_histories[symbol])}/200 ticks)")
+            
         return None
 
     def on_trade_result(self, result: str):
         current_time = time.time()
+        # Limpa tudo após qualquer operação para forçar nova análise de 200 ticks
+        self.tick_histories.clear()
+
         if result == "WIN":
-            self.global_pause_until = current_time + 20
+            self.logger.info("--- [RESULTADO] VITÓRIA! ---")
+            self.global_pause_until = current_time + 60 # Pausa de 1 min para respirar
             self.current_stake = self.initial_stake
             self.consecutive_losses = 0
-            self.tick_histories.clear() # Limpa histórico apenas no WIN
         else:
             self.consecutive_losses += 1
-            self.global_pause_until = current_time + 45 # Pausa de segurança no LOSS
+            self.logger.info(f"--- [RESULTADO] LOSS ({self.consecutive_losses}). Mercado perigoso. ---")
+            
+            # Pausa de 2 minutos após Loss para esperar o mercado mudar o ciclo
+            self.global_pause_until = current_time + 120 
+            
             if self.consecutive_losses <= self.martingale_max_consecutive_losses:
                 self.current_stake *= self.martingale_multiplier
-                # NÃO LIMPA HISTÓRICO NO LOSS PARA O MARTINGALE SER MAIS RÁPIDO
             else:
-                self.global_pause_until = current_time + 300
+                self.logger.warning("Limite de Martingale atingido. Resetando para proteger banca.")
+                self.global_pause_until = current_time + 600 # Pausa de 10 min
                 self.reset()
 
     def _create_trade_signal(self, contract_type: str, symbol: str) -> Dict[str, Any]:
