@@ -22,10 +22,10 @@ class TradingBotMain:
         config_path = os.path.join(script_dir, "bot_config.json")
         self.config_manager = ConfigManager(config_path)
 
-        deriv_app_id = os.getenv("DERIV_APP_ID") or self.config_manager.get("deriv.app_id")
-        deriv_token = os.getenv("DERIV_API_TOKEN") or self.config_manager.get("deriv.api_token")
-        tele_token = os.getenv("TELEGRAM_BOT_TOKEN") or self.config_manager.get("telegram.bot_token")
-        tele_chat = os.getenv("TELEGRAM_CHAT_ID") or self.config_manager.get("telegram.chat_id")
+        deriv_app_id = os.getenv("DERIV_APP_ID")
+        deriv_token = os.getenv("DERIV_API_TOKEN")
+        tele_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        tele_chat = os.getenv("TELEGRAM_CHAT_ID")
 
         self.deriv_api = DerivAPI(app_id=str(deriv_app_id), api_token=str(deriv_token))
         self.trading_strategy = TradingStrategy(self.config_manager)
@@ -44,7 +44,7 @@ class TradingBotMain:
         self.total_wins = 0
         self.total_losses = 0
         self.last_report_time = time.time()
-        self.trade_sent_time = 0 
+        self.trade_sent_time = 0
         
         self.is_running = False
         self.is_trade_in_progress = False
@@ -63,61 +63,43 @@ class TradingBotMain:
     async def start_trading(self):
         self.is_running = True
         self.is_trade_in_progress = False
-        self.total_profit = 0.0
-        self.total_wins = 0
-        self.total_losses = 0
-        self.last_report_time = time.time()
         self.trading_strategy.reset()
-        await self.telegram_bot.send_status_message("✅ <b>Ultra Sniper ATIVADO.</b>\nVerificando conexão com a Deriv...")
+        await self.telegram_bot.send_status_message("🚀 <b>Sniper Ativado!</b> Coletando 500 ticks...")
 
     async def stop_trading(self):
         self.is_running = False
-        self.is_trade_in_progress = False
-        await self.telegram_bot.send_status_message("🛑 <b>Bot PARADO.</b>")
+        await self.telegram_bot.send_status_message("🛑 <b>Bot Parado.</b>")
 
-    async def set_target_profit(self, new_profit: float):
-        self.target_profit = new_profit
-        await self.telegram_bot.send_status_message(f"🎯 Stop Win: ${new_profit:.2f}")
-
-    async def set_max_loss(self, new_loss: float):
-        self.max_loss = -abs(new_loss)
-        await self.telegram_bot.send_status_message(f"🛡️ Stop Loss: ${abs(self.max_loss):.2f}")
-
-    async def set_stake_amount(self, new_stake: float):
-        self.trading_strategy.set_stake(new_stake)
-        await self.telegram_bot.send_status_message(f"💸 Stake: ${new_stake:.2f}")
+    async def set_target_profit(self, val): self.config_manager.set('trading.target_profit', val)
+    async def set_max_loss(self, val): self.config_manager.set('trading.max_loss', -abs(val))
+    async def set_stake_amount(self, val): self.trading_strategy.set_stake(val)
 
     async def web_server(self):
-        async def health_check(request): return web.Response(text="Sniper Online")
         app = web.Application()
-        app.router.add_get('/', health_check)
+        app.router.add_get('/', lambda r: web.Response(text="Bot Online"))
         runner = web.AppRunner(app)
         await runner.setup()
-        port = int(os.environ.get("PORT", 8080))
-        await web.TCPSite(runner, '0.0.0.0', port).start()
+        await web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 8080))).start()
 
     async def start(self):
         try:
-            if not await self.telegram_bot.test_connection(): raise Exception("Erro Telegram")
-            if not self.deriv_api.connect(): raise Exception("Erro Deriv")
-            
+            self.deriv_api.connect()
             self.deriv_api.set_callback("tick", self.on_tick_received, asyncio.get_running_loop())
             self.deriv_api.set_callback("trade_result", self.on_trade_result, asyncio.get_running_loop())
             
             for s in ["R_100", "R_75"]: 
                 self.deriv_api.subscribe_to_ticks(s)
-            
+
             asyncio.create_task(self.web_server())
             asyncio.create_task(self.telegram_bot.run_polling())
-            await self.telegram_bot.send_status_message("🤖 <b>Bot Sniper Conectado.</b>")
             
             while not self.shutdown_requested:
                 now = time.time()
-                # DESTAVA SE PASSAR 60s
+                # Auto-destrava se a Deriv sumir por 60s
                 if self.is_trade_in_progress and (now - self.trade_sent_time) > 60:
                     self.is_trade_in_progress = False
-                    self.logger.warning("Auto-destravamento acionado.")
 
+                # Relatório a cada 1 hora (3600s)
                 if self.is_running and (now - self.last_report_time) >= 3600:
                     self.last_report_time = now
                     await self.telegram_bot.send_periodic_report(self.total_profit, self.total_wins, self.total_losses)
@@ -133,20 +115,15 @@ class TradingBotMain:
             self.is_trade_in_progress = True
             self.trade_sent_time = time.time()
             
-            try:
-                # Tenta executar a compra e captura a resposta da Deriv
-                success = self.deriv_api.buy_contract(**trade_signal)
-                
-                if success:
-                    await self.telegram_bot.send_trade_notification(trade_signal)
-                else:
-                    self.is_trade_in_progress = False
-                    await self.telegram_bot.send_status_message("⚠️ <b>Erro na Deriv:</b> Compra recusada. Verifique se o mercado está aberto e se há saldo.")
+            # --- VERIFICAÇÃO REAL DE COMPRA ---
+            response = self.deriv_api.buy_contract(**trade_signal)
             
-            except Exception as e:
+            # Se a resposta contiver 'contract_id' ou for um objeto de sucesso
+            if response and not isinstance(response, bool):
+                await self.telegram_bot.send_trade_notification(trade_signal)
+            else:
                 self.is_trade_in_progress = False
-                self.logger.error(f"Erro fatal na compra: {e}")
-                await self.telegram_bot.send_status_message(f"❌ <b>Erro Técnico:</b> {str(e)}")
+                self.logger.error("Compra falhou na Deriv. Verifique Token/Saldo.")
 
     async def on_trade_result(self, result: str, details: dict):
         self.is_trade_in_progress = False 
