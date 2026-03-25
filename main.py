@@ -1,4 +1,4 @@
-import logging, os, sys, signal, time, asyncio
+import logging, os, time, asyncio
 from dotenv import load_dotenv
 from deriv_api import DerivAPI
 from telegram_bot import TelegramTradingBot
@@ -22,9 +22,10 @@ class TradingBotMain:
         self.total_profit, self.total_wins, self.total_losses = 0.0, 0, 0
 
     async def start_trading(self):
-        self.is_running, self.is_trade_in_progress = True, False
+        self.is_running = True
+        self.is_trade_in_progress = False
         self.trading_strategy.reset()
-        await self.telegram_bot.send_status_message("🚀 <b>Sniper Ativado!</b> Coletando 500 ticks...")
+        await self.telegram_bot.send_status_message("🚀 <b>Sniper Ativado!</b> Iniciando leitura de 500 ticks...")
 
     async def stop_trading(self): self.is_running = False
 
@@ -33,15 +34,16 @@ class TradingBotMain:
     async def set_stake(self, v): self.trading_strategy.set_stake(v)
 
     async def start(self):
-        self.deriv_api.connect()
-        self.deriv_api.set_callback("tick", self.on_tick_received, asyncio.get_running_loop())
-        self.deriv_api.set_callback("trade_result", self.on_trade_result, asyncio.get_running_loop())
-        for s in ["R_100", "R_75"]: self.deriv_api.subscribe_to_ticks(s)
-        asyncio.create_task(self.telegram_bot.run_polling())
-        while True:
-            if self.is_trade_in_progress and (time.time() - self.trade_sent_time) > 60:
-                self.is_trade_in_progress = False
-            await asyncio.sleep(5)
+        if self.deriv_api.connect():
+            self.deriv_api.set_callback("tick", self.on_tick_received, asyncio.get_running_loop())
+            self.deriv_api.set_callback("trade_result", self.on_trade_result, asyncio.get_running_loop())
+            for s in ["R_100", "R_75"]: self.deriv_api.subscribe_to_ticks(s)
+            
+            asyncio.create_task(self.telegram_bot.run_polling())
+            while True:
+                if self.is_trade_in_progress and (time.time() - self.trade_sent_time) > 60:
+                    self.is_trade_in_progress = False
+                await asyncio.sleep(5)
     
     async def on_tick_received(self, tick_data):
         if not self.is_running or self.is_trade_in_progress: return
@@ -65,4 +67,5 @@ class TradingBotMain:
         await self.telegram_bot.send_result_notification(res, p, self.total_profit)
         self.trading_strategy.on_trade_result(res)
 
-if __name__ == "__main__": asyncio.run(TradingBotMain().start())
+if __name__ == "__main__":
+    asyncio.run(TradingBotMain().start())
