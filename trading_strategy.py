@@ -6,11 +6,10 @@ from technical_analyzer import TechnicalAnalyzer
 class TradingStrategy:
     def __init__(self, config_manager):
         self.config_manager = config_manager
-        self.logger = logging.getLogger(__name__)
         self.tech_analyzer = TechnicalAnalyzer()
-        self.initial_stake = float(self.config_manager.get('trading.stake_amount', 2.0))
+        self.initial_stake = 2.0
         self.current_stake = self.initial_stake
-        self.tick_histories: Dict[str, List[float]] = {}
+        self.tick_histories = {}
         self.global_pause_until = 0
 
     def reset(self):
@@ -18,8 +17,8 @@ class TradingStrategy:
         self.current_stake = self.initial_stake
 
     def set_stake(self, val):
-        self.initial_stake = val
-        self.current_stake = val
+        self.initial_stake = float(val)
+        self.current_stake = float(val)
 
     def analyze_tick(self, tick_data: dict):
         if time.time() < self.global_pause_until: return None
@@ -34,7 +33,7 @@ class TradingStrategy:
         
         count = len(self.tick_histories[symbol])
         
-        # Manda sinal de progresso a cada 100 ticks
+        # MENSAGEM DE PROGRESSO A CADA 100 TICKS
         if count > 0 and count % 100 == 0 and count <= 500:
             return {"status": "PROGRESS", "symbol": symbol, "count": count}
 
