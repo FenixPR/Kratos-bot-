@@ -1,5 +1,6 @@
 import logging, os, time, asyncio
 from dotenv import load_dotenv
+from aiohttp import web
 from deriv_api import DerivAPI
 from telegram_bot import TelegramTradingBot
 from trading_strategy import TradingStrategy
@@ -10,22 +11,27 @@ class TradingBotMain:
         load_dotenv()
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
         self.config_manager = ConfigManager("bot_config.json")
-        self.deriv_api = DerivAPI(os.getenv("DERIV_APP_ID"), os.getenv("DERIV_API_TOKEN"))
+        
+        app_id = os.getenv("DERIV_APP_ID")
+        token = os.getenv("DERIV_API_TOKEN")
+        
+        self.deriv_api = DerivAPI(app_id, token)
         self.trading_strategy = TradingStrategy(self.config_manager)
+        
         self.telegram_bot = TelegramTradingBot(
             os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID"),
             self.start_trading, self.stop_trading, self.set_profit, self.set_loss, self.set_stake
         )
+        
         self.is_running = False
         self.is_trade_in_progress = False
         self.trade_sent_time = 0
         self.total_profit, self.total_wins, self.total_losses = 0.0, 0, 0
 
     async def start_trading(self):
-        self.is_running = True
-        self.is_trade_in_progress = False
+        self.is_running, self.is_trade_in_progress = True, False
         self.trading_strategy.reset()
-        await self.telegram_bot.send_status_message("🚀 <b>Sniper Ativado!</b> Iniciando leitura de 500 ticks...")
+        await self.telegram_bot.send_status_message("🚀 <b>Sniper Ativado!</b> Coletando 500 ticks...")
 
     async def stop_trading(self): self.is_running = False
 
@@ -33,13 +39,34 @@ class TradingBotMain:
     async def set_loss(self, v): self.config_manager.set('trading.max_loss', -abs(v))
     async def set_stake(self, v): self.trading_strategy.set_stake(v)
 
+    async def handle_health(self, request):
+        return web.Response(text="Bot is alive", status=200)
+
+    async def start_web_server(self):
+        app = web.Application()
+        app.router.add_get('/', self.handle_health)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        port = int(os.environ.get("PORT", 8080))
+        site = web.TCPSite(runner, '0.0.0.0', port)
+        await site.start()
+        logging.info(f"✅ Servidor Web ativo na porta {port}")
+
     async def start(self):
+        # Inicia o servidor para o Render não dar timeout
+        await self.start_web_server()
+        
+        # Conecta na API
         if self.deriv_api.connect():
             self.deriv_api.set_callback("tick", self.on_tick_received, asyncio.get_running_loop())
             self.deriv_api.set_callback("trade_result", self.on_trade_result, asyncio.get_running_loop())
-            for s in ["R_100", "R_75"]: self.deriv_api.subscribe_to_ticks(s)
+            
+            for s in ["R_100", "R_75"]: 
+                self.deriv_api.subscribe_to_ticks(s)
             
             asyncio.create_task(self.telegram_bot.run_polling())
+            logging.info("🚀 Bot iniciado e monitorando R_100 / R_75")
+            
             while True:
                 if self.is_trade_in_progress and (time.time() - self.trade_sent_time) > 60:
                     self.is_trade_in_progress = False
