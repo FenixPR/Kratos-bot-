@@ -49,11 +49,6 @@ class ConfigManager:
             "deriv": {
                 "app_id": "",
                 "api_token": ""
-            },
-            "ai": {
-                "openai_api_key": "",
-                "openai_base_url": "https://api.openai.com/v1",
-                "model": "gemini-2.5-flash"
             }
         }
         

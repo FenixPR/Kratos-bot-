@@ -5,13 +5,14 @@ import requests
 from typing import List, Optional, Dict
 
 class AIAnalyzer:
-    def __init__(self, config_manager):
+    def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.config_manager = config_manager
-        self.api_key = self.config_manager.get("ai.openai_api_key")
-        base_url_env = self.config_manager.get("ai.openai_base_url", "https://api.openai.com/v1")
-        self.base_url = f"{base_url_env.rstrip("/")}/chat/completions"
-        self.model = self.config_manager.get("ai.model", "gemini-2.5-flash")
+        self.api_key = os.getenv("OPENAI_API_KEY")
+        # Usar a URL base do ambiente ou o padrão da OpenAI
+        base_url_env = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+        self.base_url = f"{base_url_env.rstrip('/')}/chat/completions"
+        # Modelo padrão, pode ser gpt-4.1-mini ou gemini-2.5-flash dependendo do proxy
+        self.model = os.getenv("AI_MODEL", "gemini-2.5-flash")
 
     def analyze_market(self, ticks: List[float], symbol: str) -> Optional[Dict]:
         """
@@ -25,7 +26,7 @@ class AIAnalyzer:
         digits = []
         for t in ticks:
             # Formata para garantir que temos o último dígito decimal
-            s = f"{t:.5f}".rstrip("0").rstrip(".")
+            s = f"{t:.5f}".rstrip('0').rstrip('.')
             if s:
                 digits.append(int(s[-1]))
             else:
@@ -69,12 +70,15 @@ class AIAnalyzer:
             ]
         }
         
+        # Alguns proxies podem não suportar json_object, vamos tentar sem se falhar
+        # ou apenas confiar no prompt para retornar JSON.
+
         try:
             response = requests.post(self.base_url, headers=headers, json=payload, timeout=15)
             response.raise_for_status()
             data = response.json()
             
-            content = data["choices"][0]["message"]["content"]
+            content = data['choices'][0]['message']['content']
             # Limpeza básica de Markdown se a IA retornar blocos de código
             if "```json" in content:
                 content = content.split("```json")[1].split("```")[0].strip()
@@ -85,8 +89,8 @@ class AIAnalyzer:
             
             # Log detalhado da decisão da IA
             self.logger.info(f"--- ANÁLISE IA [{symbol}] ---")
-            self.logger.info(f"Decisão: {result.get("recommendation")} | Confiança: {float(result.get("confidence", 0))*100:.1f}%")
-            self.logger.info(f"Motivo: {result.get("analysis_summary", "N/A")}")
+            self.logger.info(f"Decisão: {result.get('recommendation')} | Confiança: {float(result.get('confidence', 0))*100:.1f}%")
+            self.logger.info(f"Motivo: {result.get('analysis_summary', 'N/A')}")
             
             return result
         except Exception as e:

@@ -1,7 +1,7 @@
 {
     "trading": {
         "symbol": "R_100",
-        "stake_amount": 1.0,
+        "stake_amount": "0.6",
         "max_loss": 10.0,
         "target_profit": "100",
         "martingale_multiplier": "3.5",
@@ -39,16 +39,11 @@
         "auto_restart": true
     },
     "telegram": {
-        "bot_token": "",
-        "chat_id": ""
+        "bot_token": "8467691797:AAEuB0KySBOVfdEy3pJI3gsGJrS3E44flAo",
+        "chat_id": "1256695413"
     },
     "deriv": {
-        "app_id": "",
-        "api_token": ""
-    },
-    "ai": {
-        "openai_api_key": "",
-        "openai_base_url": "",
-        "model": ""
+        "app_id": "99542",
+        "api_token": "4cle1JCgjtQJ8zH"
     }
 }
