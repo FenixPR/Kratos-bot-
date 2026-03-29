@@ -3,9 +3,9 @@ import os
 import sys
 import signal
 import time
+import asyncio
 import threading
 from flask import Flask
-import asyncio
 from dotenv import load_dotenv
 
 from deriv_api import DerivAPI
@@ -66,6 +66,16 @@ class TradingBotMain:
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s',
                             handlers=[logging.StreamHandler(sys.stdout)])
 
+    def run_health_server(self):
+        """Servidor HTTP para manter o Render acordado e responder ao health check."""
+        app = Flask(__name__)
+        @app.route('/')
+        def health(): return "Bot is Running", 200
+        
+        port = int(os.getenv("PORT", 8080))
+        self.logger.info(f"Iniciando servidor de Health Check na porta {port}")
+        app.run(host='0.0.0.0', port=port)
+
     def signal_handler(self, signum, frame):
         self.logger.info("Sinal de encerramento recebido.")
         self.stop()
@@ -90,6 +100,9 @@ class TradingBotMain:
     
     async def start(self):
         try:
+            # Inicia servidor de health check em thread separada
+            threading.Thread(target=self.run_health_server, daemon=True).start()
+
             if not await self.telegram_bot.test_connection(): raise Exception("Falha Telegram")
             if not self.deriv_api.connect(): raise Exception("Falha Deriv")
             
