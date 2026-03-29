@@ -6,7 +6,6 @@ from typing import Dict, Any, Optional
 class ConfigManager:
     def __init__(self, config_file: Optional[str] = None):
         if config_file is None:
-            # Padrão para o diretório onde o script está localizado
             script_dir = os.path.dirname(os.path.abspath(__file__))
             self.config_file = os.path.join(script_dir, "bot_config.json")
         else:
@@ -49,6 +48,14 @@ class ConfigManager:
             "deriv": {
                 "app_id": "",
                 "api_token": ""
+            },
+            # === NOVA SEÇÃO AI ===
+            "ai": {
+                "gemini_api_key": "",
+                "model": "gemini-1.5-flash",
+                "enable_ai_confirmation": True,
+                "min_confluence_score": 4,
+                "ai_confidence_threshold": 0.75
             }
         }
         
