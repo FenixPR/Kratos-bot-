@@ -18,12 +18,13 @@ class TradingBotMain:
             self.start_trading, self.stop_trading, self.set_profit, self.set_loss, self.set_stake
         )
         self.is_running, self.is_trade_in_progress = False, False
+        self.trade_sent_time = 0
         self.total_profit, self.total_wins, self.total_losses = 0.0, 0, 0
 
     async def start_trading(self):
         self.is_running, self.is_trade_in_progress = True, False
         self.trading_strategy.reset()
-        await self.telegram_bot.send_status_message("✅ <b>Modo Sniper Verificado Online.</b>")
+        await self.telegram_bot.send_status_message("🚀 <b>Sniper Ativado!</b> Coletando 500 ticks...")
 
     async def stop_trading(self): self.is_running = False
 
@@ -32,37 +33,36 @@ class TradingBotMain:
     async def set_stake(self, v): self.trading_strategy.set_stake(v)
 
     async def start(self):
+        # Servidor Web para o Render (Resolve o erro de porta)
         app = web.Application()
-        app.router.add_get('/', lambda r: web.Response(text="Kratos Sniper Running"))
+        app.router.add_get('/', lambda r: web.Response(text="Sniper Active", status=200))
         runner = web.AppRunner(app)
         await runner.setup()
-        await web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 8080))).start()
+        port = int(os.environ.get("PORT", 8080))
+        await web.TCPSite(runner, '0.0.0.0', port).start()
 
         if self.deriv_api.connect():
             self.deriv_api.set_callback("tick", self.on_tick_received, asyncio.get_running_loop())
             self.deriv_api.set_callback("trade_result", self.on_trade_result, asyncio.get_running_loop())
             for s in ["R_100", "R_75"]: self.deriv_api.subscribe_to_ticks(s)
             asyncio.create_task(self.telegram_bot.run_polling())
-            while True: await asyncio.sleep(5)
+            while True:
+                if self.is_trade_in_progress and (time.time() - self.trade_sent_time) > 60:
+                    self.is_trade_in_progress = False
+                await asyncio.sleep(5)
     
     async def on_tick_received(self, tick_data):
         if not self.is_running or self.is_trade_in_progress: return
         res = self.trading_strategy.analyze_tick(tick_data)
+        if not res: return
         
-        if res and res["status"] == "PROGRESS":
+        if res["status"] == "PROGRESS":
             await self.telegram_bot.send_status_message(f"🔍 {res['symbol']}: {res['count']}/500 ticks.")
-        
-        elif res and res["status"] == "TRADE":
-            self.is_trade_in_progress = True
-            # CHAMADA SÍNCRONA: Espera a Deriv confirmar
-            order_result = await self.deriv_api.buy_contract_sync(**res)
-            
-            if order_result["success"]:
-                # SÓ AQUI O DINHEIRO SAIU DA CONTA
+        elif res["status"] == "TRADE":
+            self.is_trade_in_progress, self.trade_sent_time = True, time.time()
+            if self.deriv_api.buy_contract(**res):
                 await self.telegram_bot.send_trade_notification(res)
-            else:
-                self.is_trade_in_progress = False
-                await self.telegram_bot.send_status_message(f"❌ <b>Compra Recusada:</b> {order_result['error']}")
+            else: self.is_trade_in_progress = False
 
     async def on_trade_result(self, res, details):
         self.is_trade_in_progress = False
