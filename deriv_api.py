@@ -10,7 +10,8 @@ class DerivAPI:
         ws_url = f"wss://ws.binaryws.com/websockets/v3?app_id={self.app_id}"
         self.ws = websocket.WebSocketApp(
             ws_url, on_open=self.on_open, on_message=self.on_message, 
-            on_error=lambda ws,e: logging.error(f"Erro: {e}"), on_close=lambda ws,a,b: None
+            on_error=lambda ws,e: logging.error(f"Erro WS: {e}"), 
+            on_close=lambda ws,a,b: setattr(self, 'is_connected', False)
         )
         t = threading.Thread(target=self.ws.run_forever, daemon=True)
         t.start()
@@ -25,12 +26,23 @@ class DerivAPI:
     def on_message(self, ws, message):
         data = json.loads(message)
         m_type = data.get("msg_type")
+        
         if m_type == "authorize":
             self.is_connected = True
+            logging.info("✅ Conexão Autorizada!")
+
+        elif m_type == "buy":
+            # Assim que compra, pede para monitorar o contrato
+            if "buy" in data:
+                contract_id = data["buy"]["contract_id"]
+                self.ws.send(json.dumps({"proposal_open_contract": 1, "contract_id": contract_id, "subscribe": 1}))
+
         elif m_type == "tick" and self.loop:
             asyncio.run_coroutine_threadsafe(self.callbacks["tick"](data["tick"]), self.loop)
+
         elif m_type == "proposal_open_contract" and self.loop:
             c = data.get("proposal_open_contract")
+            # VERIFICA SE O CONTRATO FOI VENDIDO (FINALIZADO)
             if c and c.get("is_sold"):
                 res = "WIN" if float(c.get("profit", 0)) > 0 else "LOSS"
                 asyncio.run_coroutine_threadsafe(self.callbacks["trade_result"](res, c), self.loop)
