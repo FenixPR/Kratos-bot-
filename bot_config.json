@@ -45,5 +45,13 @@
     "deriv": {
         "app_id": "99542",
         "api_token": "4cle1JCgjtQJ8zH"
+       
+    },   
+    "ai": {
+    "gemini_api_key": "AIzaSyA5Hl-asjJYxqrS9RxbYmsB9KwFMredqVU",
+    "model": "gemini-1.5-flash",
+    "enable_ai_confirmation": true,
+    "min_confluence_score": 4,
+    "ai_confidence_threshold": 0.75
     }
 }
