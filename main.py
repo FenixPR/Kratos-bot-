@@ -3,6 +3,8 @@ import os
 import sys
 import signal
 import time
+import threading
+from flask import Flask
 import asyncio
 from dotenv import load_dotenv
 
@@ -22,28 +24,14 @@ class TradingBotMain:
         config_path = os.path.join(script_dir, "bot_config.json")
         
         self.config_manager = ConfigManager(config_path)
-        # Carrega valores do .env apenas se eles existirem
-        env_vars = {
-            "telegram.bot_token": os.getenv("TELEGRAM_BOT_TOKEN"),
-            "telegram.chat_id": os.getenv("TELEGRAM_CHAT_ID"),
-            "deriv.app_id": os.getenv("DERIV_APP_ID"),
-            "deriv.api_token": os.getenv("DERIV_API_TOKEN"),
-            "trading.symbol": os.getenv("SYMBOL"),
-            "trading.stake_amount": os.getenv("STAKE_AMOUNT"),
-            "trading.target_profit": os.getenv("TARGET_PROFIT"),
-            "trading.martingale_multiplier": os.getenv("MARTINGALE_MULTIPLIER"),
-            "trading.martingale_max_consecutive_losses": os.getenv("MARTINGALE_MAX_CONSECUTIVE_LOSSES")
-        }
         
-        for key, value in env_vars.items():
-            if value is not None:
-                self.config_manager.set(key, value)
-        
-        self.config_manager.save_config()
+        # Prioridade para variáveis de ambiente diretamente (melhor para o Render)
+        deriv_app_id = os.getenv("DERIV_APP_ID") or self.config_manager.get("deriv.app_id")
+        deriv_token = os.getenv("DERIV_API_TOKEN") or self.config_manager.get("deriv.api_token")
 
         self.deriv_api = DerivAPI(
-            app_id=self.config_manager.get("deriv.app_id"),
-            api_token=self.config_manager.get("deriv.api_token")
+            app_id=str(deriv_app_id) if deriv_app_id else None,
+            api_token=str(deriv_token) if deriv_token else None
         )
         
         self.telegram_bot = TelegramTradingBot(
