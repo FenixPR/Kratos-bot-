@@ -13,10 +13,18 @@ class TradingBotMain:
         self.config_manager = ConfigManager("bot_config.json")
         self.deriv_api = DerivAPI(os.getenv("DERIV_APP_ID"), os.getenv("DERIV_API_TOKEN"))
         self.trading_strategy = TradingStrategy(self.config_manager)
+        
+        # AJUSTE: Passando os 7 argumentos que a classe TelegramTradingBot aceita
         self.telegram_bot = TelegramTradingBot(
-            os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID"),
-            self.start_trading, self.stop_trading, self.set_profit, self.set_loss, self.set_stake
+            os.getenv("TELEGRAM_BOT_TOKEN"),
+            os.getenv("TELEGRAM_CHAT_ID"),
+            self.start_trading,
+            self.stop_trading,
+            self.set_profit,
+            self.set_loss,
+            self.set_stake
         )
+        
         self.is_running, self.is_trade_in_progress = False, False
         self.trade_sent_time = 0
         self.total_profit, self.total_wins, self.total_losses = 0.0, 0, 0
@@ -33,7 +41,6 @@ class TradingBotMain:
     async def set_stake(self, v): self.trading_strategy.set_stake(v)
 
     async def start(self):
-        # Servidor Web para o Render (Resolve o erro de porta)
         app = web.Application()
         app.router.add_get('/', lambda r: web.Response(text="Sniper Active", status=200))
         runner = web.AppRunner(app)
