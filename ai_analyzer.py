@@ -1,98 +1,70 @@
 import logging
 import json
-import os
-import requests
+import google.generativeai as genai
 from typing import List, Optional, Dict
 
 class AIAnalyzer:
-    def __init__(self):
+    def __init__(self, config_manager):
         self.logger = logging.getLogger(__name__)
-        self.api_key = os.getenv("OPENAI_API_KEY")
-        # Usar a URL base do ambiente ou o padrão da OpenAI
-        base_url_env = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-        self.base_url = f"{base_url_env.rstrip('/')}/chat/completions"
-        # Modelo padrão, pode ser gpt-4.1-mini ou gemini-2.5-flash dependendo do proxy
-        self.model = os.getenv("AI_MODEL", "gemini-2.5-flash")
+        self.config_manager = config_manager
+        
+        self.api_key = self.config_manager.get("ai.gemini_api_key")
+        self.model_name = self.config_manager.get("ai.model", "gemini-1.5-flash")
+        self.enable_ai = self.config_manager.get("ai.enable_ai_confirmation", True)
+        
+        self.model = None
+        if self.api_key and self.enable_ai:
+            try:
+                genai.configure(api_key=self.api_key)
+                self.model = genai.GenerativeModel(self.model_name)
+                self.logger.info(f"✅ Gemini IA carregada com modelo {self.model_name}")
+            except Exception as e:
+                self.logger.error(f"Erro ao configurar Gemini: {e}")
+        else:
+            self.logger.warning("⚠️ IA Gemini desativada (chave não encontrada ou enable_ai=False)")
 
-    def analyze_market(self, ticks: List[float], symbol: str) -> Optional[Dict]:
-        """
-        Análise probabilística profunda para evitar LOSS.
-        """
-        if not self.api_key:
-            self.logger.warning("OPENAI_API_KEY não configurada. IA desativada.")
+    def analyze_market(self, ticks: List[float], symbol: str, technical_indicators: Dict = None) -> Optional[Dict]:
+        if not self.model or len(ticks) < 500:
             return None
 
-        # Extrair os últimos dígitos dos preços
-        digits = []
-        for t in ticks:
-            # Formata para garantir que temos o último dígito decimal
-            s = f"{t:.5f}".rstrip('0').rstrip('.')
-            if s:
-                digits.append(int(s[-1]))
-            else:
-                digits.append(0)
-        
-        recent_digits = digits[-50:]
-        
-        # Prompt focado 100% em EVITAR LOSS e PROBABILIDADE
+        # Resumo para não estourar tokens
+        last_50 = ticks[-50:]
         prompt = f"""
-        ANÁLISE DE RISCO PARA TRADING DE DÍGITOS (ATIVO: {symbol})
-        
-        DADOS RECENTES (Últimos 50 dígitos): {recent_digits}
-        
-        Sua missão é atuar como um atuário de seguros: seu objetivo NÃO é apenas ganhar, mas NÃO PERDER.
-        
-        REGRAS DE OURO:
-        1. Identifique o dígito "frio" (que menos apareceu) e o "quente" (que mais apareceu).
-        2. Para DIGIT UNDER: A barreira deve ser um número que tenha baixíssima probabilidade de ser atingido nos próximos 1-2 ticks.
-        3. Para DIGIT OVER: A barreira deve ser um número que o mercado já superou com frequência nos últimos ticks.
-        4. Se houver qualquer incerteza ou padrão de reversão, recomende 'WAIT'.
-        
-        Responda ESTRITAMENTE em JSON:
+        Você é um trader profissional especializado em índices sintéticos da Deriv (R_75, R_100, etc.).
+        Ativo: {symbol}
+        Total de ticks analisados: {len(ticks)}
+
+        Últimos 50 preços: {last_50}
+
+        Indicadores técnicos (já passou filtro pesado de confluências):
+        {json.dumps(technical_indicators, indent=2)}
+
+        Missão: Confirmar ou rejeitar o sinal para contrato de 15 ticks (CALL = alta, PUT = baixa).
+        Seja EXTREMAMENTE conservador. Só confirme se a probabilidade de acerto for muito alta.
+        Se houver qualquer dúvida, reversão ou baixa convicção → responda WAIT.
+
+        Responda **APENAS** com JSON válido:
         {{
-            "recommendation": "UNDER" | "OVER" | "WAIT",
-            "barrier": 0-9,
+            "recommendation": "CALL" | "PUT" | "WAIT",
             "confidence": 0.0-1.0,
-            "analysis_summary": "Explique por que esta entrada evita o loss baseando-se nos 50 dígitos fornecidos"
+            "reasoning": "explicação curta em português"
         }}
         """
 
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": "Você é uma IA de alta precisão para análise probabilística de mercado financeiro."},
-                {"role": "user", "content": prompt}
-            ]
-        }
-        
-        # Alguns proxies podem não suportar json_object, vamos tentar sem se falhar
-        # ou apenas confiar no prompt para retornar JSON.
-
         try:
-            response = requests.post(self.base_url, headers=headers, json=payload, timeout=15)
-            response.raise_for_status()
-            data = response.json()
+            response = self.model.generate_content(prompt)
+            text = response.text.strip()
             
-            content = data['choices'][0]['message']['content']
-            # Limpeza básica de Markdown se a IA retornar blocos de código
-            if "```json" in content:
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif "```" in content:
-                content = content.split("```")[1].split("```")[0].strip()
+            # Limpeza de possível markdown
+            if text.startswith("```json"):
+                text = text.split("```json")[1].split("```")[0].strip()
+            elif text.startswith("```"):
+                text = text.split("```")[1].split("```")[0].strip()
             
-            result = json.loads(content)
+            result = json.loads(text)
             
-            # Log detalhado da decisão da IA
-            self.logger.info(f"--- ANÁLISE IA [{symbol}] ---")
-            self.logger.info(f"Decisão: {result.get('recommendation')} | Confiança: {float(result.get('confidence', 0))*100:.1f}%")
-            self.logger.info(f"Motivo: {result.get('analysis_summary', 'N/A')}")
-            
+            self.logger.info(f"🤖 Gemini [{symbol}] → {result.get('recommendation')} | Confiança: {result.get('confidence',0)*100:.1f}%")
             return result
         except Exception as e:
-            self.logger.error(f"Erro na análise de IA para {symbol}: {e}")
+            self.logger.error(f"Erro Gemini: {e}")
             return None
