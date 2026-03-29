@@ -6,13 +6,10 @@ from telegram_bot import TelegramTradingBot
 from trading_strategy import TradingStrategy
 from config_manager import ConfigManager
 
-# Configuração de Logs
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-logger = logging.getLogger(__name__)
-
 class TradingBotMain:
     def __init__(self):
         load_dotenv()
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
         self.config_manager = ConfigManager("bot_config.json")
         self.deriv_api = DerivAPI(os.getenv("DERIV_APP_ID"), os.getenv("DERIV_API_TOKEN"))
         self.trading_strategy = TradingStrategy(self.config_manager)
@@ -20,15 +17,14 @@ class TradingBotMain:
             os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID"),
             self.start_trading, self.stop_trading, self.set_profit, self.set_loss, self.set_stake
         )
-        self.is_running = False
-        self.is_trade_in_progress = False
+        self.is_running, self.is_trade_in_progress = False, False
         self.trade_sent_time = 0
         self.total_profit, self.total_wins, self.total_losses = 0.0, 0, 0
 
     async def start_trading(self):
         self.is_running, self.is_trade_in_progress = True, False
         self.trading_strategy.reset()
-        await self.telegram_bot.send_status_message("🚀 <b>Sniper Ativado!</b> Iniciando leitura de 500 ticks...")
+        await self.telegram_bot.send_status_message("🚀 <b>Sniper Ativado!</b> Lógica de fim de trade corrigida.")
 
     async def stop_trading(self): self.is_running = False
 
@@ -36,31 +32,24 @@ class TradingBotMain:
     async def set_loss(self, v): self.config_manager.set('trading.max_loss', -abs(v))
     async def set_stake(self, v): self.trading_strategy.set_stake(v)
 
-    async def handle_ping(self, request):
-        return web.Response(text="Sniper is Online", status=200)
-
     async def start(self):
-        # Servidor Web para o Render não derrubar o bot
+        # Servidor Web (Port Binding)
         app = web.Application()
-        app.router.add_get('/', self.handle_ping)
+        app.router.add_get('/', lambda r: web.Response(text="Sniper Active"))
         runner = web.AppRunner(app)
         await runner.setup()
-        port = int(os.environ.get("PORT", 8080))
-        await web.TCPSite(runner, '0.0.0.0', port).start()
-        logger.info(f"🌐 Servidor Web ativo na porta {port}")
+        await web.TCPSite(runner, '0.0.0.0', int(os.environ.get("PORT", 8080))).start()
 
-        # Conexão Deriv
         if self.deriv_api.connect():
             self.deriv_api.set_callback("tick", self.on_tick_received, asyncio.get_running_loop())
             self.deriv_api.set_callback("trade_result", self.on_trade_result, asyncio.get_running_loop())
-            for s in ["R_100", "R_75"]: 
-                self.deriv_api.subscribe_to_ticks(s)
-            
+            for s in ["R_100", "R_75"]: self.deriv_api.subscribe_to_ticks(s)
             asyncio.create_task(self.telegram_bot.run_polling())
-            logger.info("🎯 Bot em execução total.")
             
             while True:
-                if self.is_trade_in_progress and (time.time() - self.trade_sent_time) > 60:
+                # TRAVA DE SEGURANÇA: Destrava se a Deriv não responder em 40s
+                if self.is_trade_in_progress and (time.time() - self.trade_sent_time) > 40:
+                    logging.warning("⚠️ Timeout de operação! Destravando bot...")
                     self.is_trade_in_progress = False
                 await asyncio.sleep(5)
     
@@ -78,6 +67,7 @@ class TradingBotMain:
             else: self.is_trade_in_progress = False
 
     async def on_trade_result(self, res, details):
+        # SÓ ENTRA AQUI QUANDO A DERIV AVISA QUE O CONTRATO ACABOU
         self.is_trade_in_progress = False
         p = float(details.get('profit', 0.0))
         self.total_profit += p
@@ -86,5 +76,4 @@ class TradingBotMain:
         await self.telegram_bot.send_result_notification(res, p, self.total_profit)
         self.trading_strategy.on_trade_result(res)
 
-if __name__ == "__main__":
-    asyncio.run(TradingBotMain().start())
+if __name__ == "__main__": asyncio.run(TradingBotMain().start())
