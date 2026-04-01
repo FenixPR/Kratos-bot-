@@ -11,6 +11,7 @@ class TradingStrategy:
         self.initial_stake = 2.0
         self.current_stake = self.initial_stake
         self.tick_histories = {}
+        self.consecutive_losses = 0
         self.pause_until = 0
         self.min_confluence = config_manager.get("ai.min_confluence_score", 4)
         self.ai_conf_threshold = config_manager.get("ai.ai_confidence_threshold", 0.75)
@@ -71,14 +72,17 @@ class TradingStrategy:
             "amount": self.current_stake,
             "contract_type": contract_type,
             "duration": 15,
-            "duration_unit": "t"
+            "duration_unit": "t",
+            "barrier": "5" # Adicionado um valor de barreira padrão para contratos de dígito
         }
 
     def on_trade_result(self, result):
         self.tick_histories.clear()
         if result == "WIN":
             self.current_stake = self.initial_stake
+            self.consecutive_losses = 0
             self.pause_until = time.time() + 60
         else:
             self.current_stake *= 2.1
+            self.consecutive_losses += 1
             self.pause_until = time.time() + 120

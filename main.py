@@ -48,6 +48,7 @@ class TradingBotMain:
         self.total_wins = 0
         self.total_losses = 0
         self.last_report_time = time.time()
+        self.statistics_interval = self.config_manager.get("notifications.statistics_interval", 3600)
         
         self.target_profit = float(self.config_manager.get('trading.target_profit', 100.0))
         self.max_loss = -abs(float(self.config_manager.get('trading.max_loss', 1000.0)))
@@ -55,8 +56,7 @@ class TradingBotMain:
         self.is_running = False
         self.is_trade_in_progress = False
         self.shutdown_requested = False
-        self.is_paused = False
-        self.pause_end_time = 0
+
 
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
@@ -116,10 +116,15 @@ class TradingBotMain:
             await self.telegram_bot.send_status_message("🤖 Bot Conectado. Use /start_bot")
             
             while not self.shutdown_requested:
-                if self.is_running and self.is_paused and time.time() >= self.pause_end_time:
-                    self.is_paused = False
+                if self.is_running and time.time() >= self.trading_strategy.pause_until:
                     self.trading_strategy.reset()
                     self.is_trade_in_progress = False
+
+                # Lógica para enviar relatório horário
+                if self.config_manager.get("notifications.send_statistics", False) and \
+                   (time.time() - self.last_report_time) >= self.statistics_interval:
+                    await self.telegram_bot.send_hourly_report(self.total_profit, self.total_wins, self.total_losses)
+                    self.last_report_time = time.time()
                 await asyncio.sleep(5)
             telegram_task.cancel()
         except Exception as e:
@@ -133,7 +138,16 @@ class TradingBotMain:
             if trade_signal:
                 self.is_trade_in_progress = True
                 await self.telegram_bot.send_trade_notification(trade_signal)
-                self.deriv_api.buy_contract(**trade_signal)
+                # Extrai os parâmetros necessários para buy_contract
+                contract_params = {
+                    "contract_type": trade_signal["contract_type"],
+                    "amount": trade_signal["amount"],
+                    "barrier": trade_signal["barrier"], # Agora incluído
+                    "duration": trade_signal["duration"],
+                    "duration_unit": trade_signal["duration_unit"],
+                    "symbol": trade_signal["symbol"]
+                }
+                self.deriv_api.buy_contract(**contract_params)
         except Exception as e:
             self.logger.error(f"Erro tick: {e}")
             self.is_trade_in_progress = False
@@ -152,8 +166,7 @@ class TradingBotMain:
             self.is_trade_in_progress = False
 
             if self.trading_strategy.consecutive_losses >= 2:
-                self.is_paused = True
-                self.pause_end_time = time.time() + 300
+                # A pausa agora é gerenciada exclusivamente pela TradingStrategy
                 self.is_trade_in_progress = True # Mantém travado durante a pausa
                 await self.telegram_bot.send_status_message("⚠️ Pausa de 5 min (2 perdas).")
             elif self.total_profit >= self.target_profit or self.total_profit <= self.max_loss:
