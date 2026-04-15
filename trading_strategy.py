@@ -39,14 +39,36 @@ class TradingStrategy:
             self.tick_histories[symbol].pop(0)
         
         count = len(self.tick_histories[symbol])
-        if count < 500:
+        if count < 200: # Reduzido para 200, pois os indicadores agora exigem menos dados iniciais
             return None
 
-        # Análise técnica pesada
+        # Análise técnica robusta
         tech_result = self.tech_analyzer.analyze_trend(self.tick_histories[symbol])
         
         if tech_result["status"] == "WAIT" or tech_result["confluence_score"] < self.min_confluence:
             return None
+
+        # Filtros adicionais de tendência e volatilidade
+        indicators = tech_result["indicators"]
+        last_p = indicators["last_price"]
+
+        # Filtro de tendência principal (EMA200)
+        if tech_result["status"] == "CALL" and last_p < indicators["ema200"]:
+            return None # Não compra CALL se o preço estiver abaixo da EMA200
+        if tech_result["status"] == "PUT" and last_p > indicators["ema200"]:
+            return None # Não compra PUT se o preço estiver acima da EMA200
+
+        # Filtro de volatilidade (Bandas de Bollinger)
+        # Evitar trades quando as bandas estão muito apertadas (baixa volatilidade)
+        if (indicators["upper_bb"] - indicators["lower_bb"]) < (last_p * 0.0005):
+            return None # Bandas muito apertadas, indica baixa volatilidade
+
+        # Filtro de RSI para evitar reversões imediatas em zonas extremas
+        if tech_result["status"] == "CALL" and indicators["rsi"] > 80:
+            return None # Evita CALL se RSI estiver muito sobrecomprado
+        if tech_result["status"] == "PUT" and indicators["rsi"] < 20:
+            return None # Evita PUT se RSI estiver muito sobrevendido
+
 
         # Só chega aqui se o filtro pesado passou → agora IA Gemini (se habilitada)
         if self.ai_analyzer.model and self.config_manager.get("ai.enable_ai_confirmation", True):
@@ -81,8 +103,24 @@ class TradingStrategy:
         if result == "WIN":
             self.current_stake = self.initial_stake
             self.consecutive_losses = 0
-            self.pause_until = time.time() + 60
+            self.pause_until = time.time() + 60  # Pausa menor após vitória
         else:
-            self.current_stake *= 2.1
             self.consecutive_losses += 1
-            self.pause_until = time.time() + 120
+            # Implementação de Martingale mais robusta
+            martingale_multiplier = self.config_manager.get("trading.martingale_multiplier", 2.1)
+            max_consecutive_losses = self.config_manager.get("trading.martingale_max_consecutive_losses", 5)
+
+            if self.consecutive_losses < max_consecutive_losses:
+                self.current_stake *= martingale_multiplier
+            else:
+                # Se exceder o limite de perdas consecutivas, reinicia o stake
+                self.current_stake = self.initial_stake
+                self.consecutive_losses = 0
+                # Adicionar notificação ao usuário sobre o reset do martingale
+
+            self.pause_until = time.time() + 180  # Pausa maior após perda para recuperação
+
+        # Notificar o usuário sobre o reset do martingale e a pausa prolongada
+        # Isso seria feito via TelegramBot, mas aqui estamos na estratégia
+        # A lógica de notificação será tratada na main.py ou telegram_bot.py
+
