@@ -73,7 +73,7 @@ class TradingStrategy:
             "contract_type": contract_type,
             "duration": 15,
             "duration_unit": "t",
-            "barrier": "5" # Adicionado um valor de barreira padrão para contratos de dígito
+            "barrier": None # Removido barreira fixa para CALL/PUT padrão
         }
 
     def on_trade_result(self, result):

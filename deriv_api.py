@@ -125,23 +125,26 @@ class DerivAPI:
         message = {"ticks": symbol, "subscribe": 1}
         return self.send_message(message)
         
-    def buy_contract(self, contract_type: str, amount: float, barrier: str, 
+    def buy_contract(self, contract_type: str, amount: float, barrier: Optional[str], 
                      duration: int, duration_unit: str, symbol: str):
-        """Função correta para comprar um contrato de dígito."""
-        self.logger.info(f"A enviar ordem de compra: {contract_type} {symbol} | Barreira: {barrier} | Valor: {amount}")
+        """Função para comprar um contrato na Deriv."""
+        self.logger.info(f"A enviar ordem de compra: {contract_type} {symbol} | Valor: {amount}")
+        params = {
+            "amount": amount,
+            "basis": "stake",
+            "contract_type": contract_type,
+            "currency": "USD",
+            "duration": duration,
+            "duration_unit": duration_unit,
+            "symbol": symbol
+        }
+        if barrier:
+            params["barrier"] = barrier
+            
         message = {
             "buy": 1,
-            "price": 10000, # Um valor alto para garantir que o preço seja aceite
-            "parameters": {
-                "amount": amount,
-                "basis": "stake",
-                "contract_type": contract_type,
-                "currency": "USD",
-                "duration": duration,
-                "duration_unit": duration_unit,
-                "symbol": symbol,
-                "barrier": barrier
-            }
+            "price": 10000,
+            "parameters": params
         }
         return self.send_message(message)
 
