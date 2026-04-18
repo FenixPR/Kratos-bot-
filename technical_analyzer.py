@@ -2,7 +2,7 @@ import math
 
 class TechnicalAnalyzer:
     def calculate_indicators(self, prices):
-        if len(prices) < 200:
+        if len(prices) < 100:
             return None
         
         # RSI (14) - Mais robusto
@@ -33,7 +33,7 @@ class TechnicalAnalyzer:
         ema9 = self._calculate_ema(prices, 9)
         ema21 = self._calculate_ema(prices, 21)
         ema50 = self._calculate_ema(prices, 50)
-        ema200 = self._calculate_ema(prices, 200)
+        ema200 = self._calculate_ema(prices, 100) # Reduzido para 100 para operar mais rápido
         
         # Verifica se todas as EMAs foram calculadas com sucesso
         if any(e is None for e in [ema9, ema21, ema50, ema200]): return None
@@ -141,7 +141,7 @@ class TechnicalAnalyzer:
 
         # Determina o status com base na confluência e direção das EMAs
         status = "WAIT"
-        if score >= 4:
+        if score >= 3:
             if ind["ema9"] > ind["ema21"] and ind["ema21"] > ind["ema50"] and ind["rsi"] < 70 and ind["stoch_k"] < 80: # Filtro para evitar sobrecompra
                 status = "CALL"
             elif ind["ema9"] < ind["ema21"] and ind["ema21"] < ind["ema50"] and ind["rsi"] > 30 and ind["stoch_k"] > 20: # Filtro para evitar sobrevenda

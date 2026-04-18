@@ -113,7 +113,8 @@ class TradingBotMain:
             for s in symbols: self.deriv_api.subscribe_to_ticks(s)
             
             telegram_task = asyncio.create_task(self.telegram_bot.run_polling())
-            await self.telegram_bot.send_status_message("🤖 <b>Bot Conectado e Online!</b>\n\n⚠️ O bot está em modo de espera. Para começar a operar, envie o comando:\n/start_bot")
+            await self.telegram_bot.send_status_message("🤖 <b>Bot Conectado e Online!</b>\n\n✅ Iniciando operações automaticamente...")
+            self.is_running = True
             
             while not self.shutdown_requested:
                 if self.is_running and time.time() >= self.trading_strategy.pause_until:

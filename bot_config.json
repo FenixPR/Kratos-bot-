@@ -48,10 +48,10 @@
        
     },   
     "ai": {
-    "gemini_api_key": "",
-    "model": "gemini-1.5-flash",
-    "enable_ai_confirmation": true,
-    "min_confluence_score": 4,
-    "ai_confidence_threshold": 0.75
+        "gemini_api_key": "",
+        "model": "gemini-1.5-flash",
+        "enable_ai_confirmation": false,
+        "min_confluence_score": 3,
+        "ai_confidence_threshold": 0.65
     }
 }

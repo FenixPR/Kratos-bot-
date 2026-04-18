@@ -13,8 +13,8 @@ class TradingStrategy:
         self.tick_histories = {}
         self.consecutive_losses = 0
         self.pause_until = 0
-        self.min_confluence = config_manager.get("ai.min_confluence_score", 4)
-        self.ai_conf_threshold = config_manager.get("ai.ai_confidence_threshold", 0.75)
+        self.min_confluence = config_manager.get("ai.min_confluence_score", 3)
+        self.ai_conf_threshold = config_manager.get("ai.ai_confidence_threshold", 0.65)
 
     def reset(self):
         self.tick_histories.clear()
@@ -39,7 +39,7 @@ class TradingStrategy:
             self.tick_histories[symbol].pop(0)
         
         count = len(self.tick_histories[symbol])
-        if count < 200: # Reduzido para 200, pois os indicadores agora exigem menos dados iniciais
+        if count < 100: # Reduzido para 100 para operar mais rápido após iniciar
             return None
 
         # Análise técnica robusta
@@ -52,11 +52,11 @@ class TradingStrategy:
         indicators = tech_result["indicators"]
         last_p = indicators["last_price"]
 
-        # Filtro de tendência principal (EMA200)
-        if tech_result["status"] == "CALL" and last_p < indicators["ema200"]:
-            return None # Não compra CALL se o preço estiver abaixo da EMA200
-        if tech_result["status"] == "PUT" and last_p > indicators["ema200"]:
-            return None # Não compra PUT se o preço estiver acima da EMA200
+        # Filtro de tendência principal (EMA200) - Desativado temporariamente para aumentar frequência
+        # if tech_result["status"] == "CALL" and last_p < indicators["ema200"]:
+        #     return None 
+        # if tech_result["status"] == "PUT" and last_p > indicators["ema200"]:
+        #     return None
 
         # Filtro de volatilidade (Bandas de Bollinger)
         # Evitar trades quando as bandas estão muito apertadas (baixa volatilidade)

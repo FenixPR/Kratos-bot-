@@ -54,9 +54,9 @@ class ConfigManager:
             "ai": {
                 "gemini_api_key": "",
                 "model": "gemini-1.5-flash",
-                "enable_ai_confirmation": True,
-                "min_confluence_score": 4,
-                "ai_confidence_threshold": 0.75
+                "enable_ai_confirmation": False,
+                "min_confluence_score": 3,
+                "ai_confidence_threshold": 0.65
             }
         }
         
